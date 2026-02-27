@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DonghuaWatch API Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #020617;
+            --card-bg: #0f172a;
+            --accent-color: #38bdf8;
+            --accent-secondary: #818cf8;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --code-bg: #000000;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            line-height: 1.6;
+            scroll-behavior: smooth;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 60px 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 80px;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(to right, var(--accent-color), var(--accent-secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+        }
+
+        .status-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .status {
+            padding: 6px 18px;
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid var(--accent-color);
+            border-radius: 30px;
+            color: var(--accent-color);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .badge {
+            padding: 4px 10px;
+            background: rgba(160, 174, 192, 0.1);
+            border: 1px solid #718096;
+            border-radius: 6px;
+            color: #cbd5e0;
+            font-size: 0.75rem;
+        }
+
+        .fallback-info {
+            margin-top: 20px;
+            font-size: 0.85rem;
+            color: var(--warning);
+            background: rgba(245, 158, 11, 0.1);
+            padding: 10px 20px;
+            border-radius: 10px;
+            display: inline-block;
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+
+        nav {
+            position: sticky;
+            top: 20px;
+            z-index: 100;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 10px;
+            border-radius: 12px;
+            margin-bottom: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        nav a:hover {
+            color: var(--accent-color);
+        }
+
+        .section-title {
+            font-size: 1.8rem;
+            margin-top: 60px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--accent-color);
+            padding-left: 15px;
+        }
+
+        .endpoint {
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .endpoint::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--accent-color);
+        }
+
+        .method {
+            background-color: var(--success);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 0.8rem;
+            margin-right: 12px;
+        }
+
+        .url {
+            font-family: 'Courier New', Courier, monospace;
+            color: var(--accent-color);
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .desc {
+            margin: 20px 0;
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+
+        .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 15px 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .feature-tag {
+            font-size: 0.75rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        pre {
+            background-color: var(--code-bg);
+            padding: 20px;
+            border-radius: 12px;
+            overflow-x: auto;
+            font-size: 0.85rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #d1d5db;
+        }
+
+        .try-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 15px;
+            background: linear-gradient(to right, var(--accent-color), var(--accent-secondary));
+            color: white;
+            padding: 10px 24px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: opacity 0.2s;
+        }
+
+        .try-btn:hover {
+            opacity: 0.9;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 100px;
+            padding-top: 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .url {
+                font-size: 0.9rem;
+            }
+
+            nav {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>DonghuaWatch Official API</h1>
+            <p>High-Performance Data Service for DonghuaWatch Ecosystem</p>
+            <div class="status-container">
+                <a href="https://donghuawatch.vercel.app" class="try-btn"
+                    style="background: var(--success); margin-top: 0;">🌐 Visit Official Website</a>
+                <div class="status">● Status: Active & Stable</div>
+                <div class="badge">Version 2.5.0</div>
+            </div>
+        </header>
+
+        <nav>
+            <a href="#core">Core API</a>
+            <a href="#browse">Browse</a>
+            <a href="#content">Content</a>
+            <a href="#info">Schedule</a>
+        </nav>
+
+        <section id="core">
+            <h2 class="section-title">Core API</h2>
+
+            <div class="endpoint">
+                <div>
+                    <span class="method">GET</span>
+                    <span class="url">/api/home</span>
+                </div>
+                <p class="desc">Get the latest donghua releases with high-quality metadata and smart caching.</p>
+                <div class="feature-list">
+                    <span class="feature-tag">🚀 Fast Response</span>
+                    <span class="feature-tag">✨ Official Source</span>
+                    <span class="feature-tag">✨ Clean Titles</span>
+                </div>
+                <a href="/api/home" class="try-btn" target="_blank">Test Home API</a>
+            </div>
+
+            <div class="endpoint">
+                <div>
+                    <span class="method">GET</span>
+                    <span class="url">/api/search/:keyword/:page</span>
+                </div>
+                <p class="desc">Smart search engine with pagination support.</p>
+                <a href="/api/search/immortal/1" class="try-btn" target="_blank">Search "Immortal"</a>
+            </div>
+        </section>
+
+        <!-- (Keep other sections similar but remove specific source mentions if any) -->
+
+        <section id="browse">
+            <!-- ... existing content ... -->
+            <h2 class="section-title">Browse & Filter</h2>
+
+            <div class="endpoint">
+                <div>
+                    <span class="method">GET</span>
+                    <span class="url">/api/ongoing/:page</span>
+                </div>
+                <p class="desc">Active airing donghua sorted by latest update.</p>
+                <a href="/api/ongoing/1" class="try-btn" target="_blank">View Ongoing</a>
+            </div>
+
+            <div class="endpoint">
+                <div>
+                    <span class="method">GET</span>
+                    <span class="url">/api/genres</span>
+                </div>
+                <p class="desc">List of all available thematic categories.</p>
+                <a href="/api/genres" class="try-btn" target="_blank">List All Genres</a>
+            </div>
+        </section>
+
+        <section id="content">
+            <h2 class="section-title">Deep Content</h2>
+
+            <div class="endpoint">
+                <div>
+                    <span class="method">GET</span>
+                    <span class="url">/api/detail/:slug</span>
+                </div>
+                <p class="desc">Complete series profile, synopsis, and episode index.</p>
+                <a href="/api/detail/renegade-immortal" class="try-btn" target="_blank">Detail Example</a>
+            </div>
+
+            <div class="endpoint">
+                <div>
+                    <span class="method">GET</span>
+                    <span class="url">/api/episode/:slug</span>
+                </div>
+                <p class="desc">Official streaming links & VIP Download library.</p>
+                <div class="feature-list">
+                    <span class="feature-tag">360p</span>
+                    <span class="feature-tag">480p</span>
+                    <span class="feature-tag">720p</span>
+                    <span class="feature-tag">1080p FHD</span>
+                </div>
+            </div>
+        </section>
+
+        <section id="info">
+            <h2 class="section-title">Schedule</h2>
+
+            <div class="endpoint">
+                <div>
+                    <span class="method">GET</span>
+                    <span class="url">/api/schedule</span>
+                </div>
+                <p class="desc">Real-time weekly broadcast schedule.</p>
+                <a href="/api/schedule" class="try-btn" target="_blank">View Weekly Schedule</a>
+            </div>
+        </section>
+
+        <footer>
+            <p>&copy; 2026 DonghuaWatch Official API. All Rights Reserved.</p>
+            <p style="font-size: 0.65rem; margin-top: 15px; opacity: 0.3; letter-spacing: 0.5px;">Powered by
+                DonghuaWatch Technology</p>
+        </footer>
+    </div>
+</body>
+
+</html>
