@@ -313,8 +313,7 @@ app.get('/api/detail/:slug', async (req, res) => {
         };
 
         if (data.status === 'success' &&
-            data.data.episodes_list &&
-            data.data.episodes_list.length > 0 &&
+            data.data.title &&
             !data.data.title.toLowerCase().includes('tutorial') &&
             !data.data.title.toLowerCase().includes('cara melewati')) {
             res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=600');
