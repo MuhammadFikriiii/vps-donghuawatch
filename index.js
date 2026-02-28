@@ -2,7 +2,24 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const scraper = require('./scraper');
+const resolver = require('./resolver');
 require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
+
+// --- Supabase Configuration (Cepat & Mantap) ---
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+
+if (!supabase) {
+    console.warn('[DB WARNING] Supabase not configured. Persistent cache is OFF.');
+} else {
+    // Verifikasi koneksi ke Supabase saat start
+    supabase.from('premium_cache').select('slug').limit(1).then(({ error }) => {
+        if (error) console.error('[DB ERROR] Supabase connection failed:', error.message);
+        else console.log('✅ Supabase connected and ready to save data.');
+    });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -323,38 +340,61 @@ app.get('/api/detail/:slug', async (req, res) => {
     const { slug } = req.params;
 
     try {
+        // 1. CEK DB METADATA (SUPABASE)
+        if (supabase) {
+            try {
+                const { data: dbData, error } = await supabase
+                    .from('anime_metadata')
+                    .select('*')
+                    .eq('slug', slug)
+                    .single();
+
+                // Pastikan data ada dan tidak rusak (ceking list episode)
+                if (dbData && !error && dbData.episodes && dbData.episodes.length > 0) {
+                    console.log(`[DETAIL] 🎯 HIT DATABASE: ${slug}`);
+
+                    // Kembalikan ke format yang dimengerti Frontend
+                    return res.json({
+                        ...dbData.metadata, // Menyebar status, studio, released, rating, dll
+                        title: dbData.title,
+                        poster: dbData.poster,
+                        synopsis: dbData.synopsis,
+                        episodes_list: dbData.episodes,
+                        genres: dbData.metadata?.genres || [],
+                        status: 'success'
+                    });
+                }
+            } catch (e) { }
+        }
+
+        // 2. SCRAPE JIKA TDK ADA DI DB
         const data = await getCachedData(`detail-${slug}`, () => scraper.getDetail(slug));
 
-        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-        const host = req.get('host');
-        const fullUrl = `${protocol}://${host}${req.originalUrl}`;
+        if (data.status === 'success' && data.data.title) {
+            // 3. SIMPAN KE DB (BACKGROUND)
+            if (supabase) {
+                const meta = data.data;
+                supabase.from('anime_metadata').upsert({
+                    slug: slug,
+                    title: meta.title,
+                    synopsis: meta.synopsis,
+                    poster: meta.poster,
+                    metadata: meta.info || {},
+                    episodes: meta.episodes_list || [],
+                    updated_at: new Date()
+                }).then(({ error }) => {
+                    if (error) console.error('[DB ERROR] Detail Save failed:', error.message);
+                    else console.log(`[DB] 💾 Detail cached for: ${slug}`);
+                });
+            }
 
-        const notFoundData = {
-            title: "Data Tidak Ditemukan",
-            poster: fullUrl,
-            synopsis: "Donghua yang kamu cari tidak tersedia atau terjadi kesalahan saat mengambil data.",
-            rating: "-",
-            status: "Error",
-            type: "-",
-            studio: "-",
-            released: "-",
-            duration: "-",
-            episodes_count: "0",
-            genres: [],
-            episodes_list: [],
-            info: {},
-            error: true,
-            message: "Donghua tidak ditemukan"
-        };
-
-        if (data.status === 'success' &&
-            data.data.title &&
-            !data.data.title.toLowerCase().includes('tutorial') &&
-            !data.data.title.toLowerCase().includes('cara melewati')) {
             res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=600');
             res.json(data.data);
         } else {
-            res.json(notFoundData);
+            res.json({
+                status: 'error',
+                message: "Detail tidak ditemukan"
+            });
         }
     } catch (err) {
         res.status(500).json({ status: 'error', message: err.message });
@@ -369,16 +409,245 @@ app.get('/api/episode/:slug', async (req, res) => {
         console.log(`[API] Fetching episode: ${slug}`);
         const data = await getCachedData(cacheKey, () => scraper.getEpisode(slug));
 
-        if (data.status === 'success') {
-            console.log(`[API] Success fetching ${slug}`);
+        if (data.status === 'success' && data.data) {
+            const epData = data.data;
+
+            // 💡 FIX: JIKA LIST EPISODE KOSONG, COBA AMBIL DARI DATABASE METADATA SERINYA
+            const seriesSlug = epData.donghua_details?.slug;
+            if ((!epData.episodes_list || epData.episodes_list.length === 0) && seriesSlug && supabase) {
+                try {
+                    const { data: dbMeta } = await supabase
+                        .from('anime_metadata')
+                        .select('episodes')
+                        .eq('slug', seriesSlug)
+                        .single();
+
+                    if (dbMeta?.episodes) {
+                        console.log(`[EPISODE] 🎯 Restored Playlist from DB for: ${slug}`);
+                        epData.episodes_list = dbMeta.episodes;
+                    }
+                } catch (dbErr) { }
+            }
+
             res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=3600');
-            res.json(data.data);
+            res.json(epData);
         } else {
             res.status(404).json(data);
         }
     } catch (err) {
         console.error(`[API] Error fetching ${slug}: ${err.message}`);
         res.status(500).json({ status: 'error', message: err.message });
+    }
+});
+
+/**
+ * PREMIUM STREAM RESOLVER ENDPOINT (ULTRA FAST)
+ */
+app.get('/api/premium/stream/:slug', async (req, res) => {
+    const { slug } = req.params;
+    const cacheKey = `premium-stream-${slug}`;
+
+    try {
+        const startTimeTotal = Date.now();
+
+        // 1. CEK PERSISTENT CACHE (SUPABASE) - SECEPAT KILAT
+        if (supabase) {
+            try {
+                const { data, error } = await supabase
+                    .from('premium_cache')
+                    .select('*')
+                    .eq('slug', slug)
+                    .single();
+
+                if (data && !error) {
+                    // Cek apakah data masih fresh (misal 24 jam)
+                    const createdNode = new Date(data.created_at);
+                    const now = new Date();
+                    const hoursDiff = (now - createdNode) / (1000 * 60 * 60);
+
+                    if (hoursDiff < 24) {
+                        console.log(`[PREMIUM] 🎯 HIT SUPABASE: ${slug} (Instant Load)`);
+                        return res.json({
+                            status: 'success',
+                            stream_url: data.stream_url,
+                            qualities: data.qualities,
+                            provider: data.provider,
+                            resolved_in: 'DATABASE (0.1s)',
+                            is_cached: true
+                        });
+                    }
+                }
+            } catch (dbErr) {
+                console.error('[DB ERROR] Failed to fetch cache:', dbErr.message);
+            }
+        }
+
+        const cached = await getCachedData(cacheKey, async () => {
+            const startTime = Date.now();
+            console.log(`[PREMIUM] ⚡ Memulai resolusi cepat untuk: ${slug}`);
+
+            // 1. REUSE EPISODE CACHE (Kunci Kecepatan)
+            let epData = null;
+            const cachedEp = apiCache.get(`episode-${slug}`);
+            if (cachedEp && cachedEp.data) {
+                console.log('[PREMIUM] Reuse existing episode cache');
+                epData = cachedEp.data;
+            } else {
+                console.log('[PREMIUM] No episode cache, fetching fresh...');
+                const raw = await scraper.getEpisode(slug);
+                if (raw && raw.status === 'success') epData = raw;
+            }
+
+            if (!epData || epData.status !== 'success') {
+                throw new Error('Episode data not found');
+            }
+
+            const servers = epData.data.streaming?.servers || [];
+            if (servers.length === 0) throw new Error('No servers available');
+
+            // 2. Parallel Tasks
+            const tasks = [];
+
+            // Task Streamruby
+            const ruby = servers.find(s => s.url.includes('ruby') || s.url.includes('streamruby') || s.url.includes('rubyvid'));
+            if (ruby) {
+                tasks.push((async () => {
+                    const link = await resolver.resolveStreamruby(ruby.url);
+                    if (!link) throw new Error('Ruby failed');
+                    return { link, provider: 'Streamruby' };
+                })());
+            }
+
+            // Task Okru
+            const okru = servers.find(s => s.url.includes('ok.ru'));
+            if (okru) {
+                tasks.push((async () => {
+                    const link = await resolver.resolveOkru(okru.url);
+                    if (!link) throw new Error('Okru failed');
+                    return { link, provider: 'Okru' };
+                })());
+            }
+
+            // Task Generic Sniffing (untuk sisanya, coba 2 tercepat)
+            const others = servers.filter(s => !s.url.includes('ruby') && !s.url.includes('ok.ru'));
+            others.slice(0, 2).forEach(s => {
+                tasks.push((async () => {
+                    const axios = require('axios');
+                    const res = await axios.get(s.url, { headers: resolver.headers, timeout: 10000 });
+                    const link = resolver.sniffGeneric(res.data);
+                    if (!link) throw new Error('Sniff failed');
+                    return { link, provider: 'Sniff' };
+                })());
+            });
+
+            if (tasks.length === 0) throw new Error('No compatible servers');
+
+            const result = await Promise.any(tasks);
+            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+            console.log(`[PREMIUM SUCCESS] 🚀 Super-Fast dlm ${duration}s via ${result.provider}`);
+
+            // Handle Multi-Quality vs Single URL
+            const isMulti = Array.isArray(result.link);
+            const finalQualities = isMulti ? result.link : null;
+            const finalStreamUrl = isMulti ? result.link[0].url : result.link;
+
+            const responseData = {
+                status: 'success',
+                stream_url: finalStreamUrl,
+                qualities: finalQualities,
+                provider: result.provider,
+                resolved_in: `${duration}s`
+            };
+
+            // 💾 SIMPAN KE SUPABASE SUPAYA INSTAN BUAT USER BERIKUTNYA
+            if (supabase) {
+                supabase.from('premium_cache').upsert({
+                    slug: slug,
+                    stream_url: finalStreamUrl,
+                    qualities: finalQualities,
+                    provider: result.provider,
+                    resolved_in: `${duration}s`,
+                    updated_at: new Date()
+                }).then(({ error }) => {
+                    if (error) console.error('[DB ERROR] Save failed:', error.message);
+                    else console.log(`[PREMIUM] 💾 Data saved to Supabase for: ${slug}`);
+                });
+            }
+
+            return responseData;
+        });
+        res.json(cached);
+    } catch (err) {
+        console.error(`[PREMIUM ERROR] ${slug}:`, err.message);
+        res.status(500).json({ status: 'error', message: err.message });
+    }
+});
+
+/**
+ * ULTRA SMARTER HLS CORS PROXY
+ * Fixes CORS and relative path issues in manifests, LINE BY LINE parsing.
+ */
+app.get('/api/proxy/hls', async (req, res) => {
+    const streamUrl = req.query.url;
+    if (!streamUrl) return res.status(400).send('No URL provided');
+
+    try {
+        const axios = require('axios'); // Pastikan axios sudah di-import di atas
+        const response = await axios.get(streamUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Referer': 'https://ok.ru/',
+                'Accept': '*/*'
+            },
+            timeout: 10000
+        });
+
+        let content = response.data;
+
+        // Jika response adalah manifest m3u8
+        if (typeof content === 'string' && (content.includes('#EXTM3U') || content.includes('#EXT-X-STREAM-INF'))) {
+
+            // Dapatkan base URL dari server API kamu saat ini
+            const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+            const host = req.get('host');
+            const proxyBase = `${protocol}://${host}/api/proxy/hls?url=`;
+
+            // FIX UTAMA: Parsing baris per baris agar URL HLS anak tidak lolos dari Proxy
+            content = content.split('\n').map(line => {
+                const trimmedLine = line.trim();
+
+                // Abaikan baris kosong atau baris metadata HLS (#)
+                if (!trimmedLine || trimmedLine.startsWith('#')) return line;
+
+                try {
+                    // Jadikan URL absolut (baik asalnya relatif maupun sudah absolut)
+                    const absoluteUrl = new URL(trimmedLine, streamUrl).href;
+
+                    // PROXY ULANG jika mengarah ke .m3u8 lain (resolusi 1080p, 720p, dll)
+                    if (absoluteUrl.includes('.m3u8')) {
+                        return proxyBase + encodeURIComponent(absoluteUrl);
+                    }
+
+                    // Untuk file .ts (potongan video), kembalikan URL absolut aslinya (Bypass Proxy)
+                    // Ini penting agar bandwidth VPS kamu tidak terkuras!
+                    return absoluteUrl;
+                } catch (e) {
+                    // Jika gagal parsing URL, kembalikan teks aslinya
+                    return line;
+                }
+            }).join('\n');
+
+            res.setHeader('Content-Type', 'application/x-mpegURL');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.send(content);
+        }
+
+        // Untuk file lain yang bukan m3u8, stream/redirect saja
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.redirect(streamUrl);
+    } catch (err) {
+        console.error('[PROXY ERROR]', err.message);
+        res.status(500).send('Proxy Failed');
     }
 });
 

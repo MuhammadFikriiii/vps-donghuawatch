@@ -116,92 +116,55 @@ const scraper = {
         const separator = targetUrl.includes('?') ? '&' : '?';
         const freshUrl = `${targetUrl}${separator}_cb=${timestamp}`;
 
-        const isRecentlyFailed = LAST_CONNECTION_STATUS.method === 'proxy' && (Date.now() - LAST_CONNECTION_STATUS.lastChecked < 30 * 60 * 1000);
+        // 1. STRATEGI: BALAPAN (RACING) - SIKAT BARENGAN!
+        // Kita tidak mau antre satu-satu. Kita sikat semua secara bersamaan, siapa cepat dia dapat.
+        console.log(`[RACE START] 🏎️ Memulai balapan koneksi untuk: ${targetUrl}`);
 
-        // 1. Coba Direct Connection (Hanya jika belum pernah gagal baru-baru ini)
-        if (!isRecentlyFailed || LAST_CONNECTION_STATUS.failCount < 3) {
+        const tasks = [];
+
+        // Task 1: Direct (Coba dulu secara agresif 3 detik)
+        const isRecentlyFailed = LAST_CONNECTION_STATUS.method === 'proxy' && (Date.now() - LAST_CONNECTION_STATUS.lastChecked < 15 * 60 * 1000);
+        if (!isRecentlyFailed) {
+            tasks.push((async () => {
+                const res = await axios.get(targetUrl, { headers: getHeaders(targetUrl), timeout: 3500 });
+                if (res.status === 200 && (res.data.includes('bs') || res.data.includes('utao') || res.data.includes('animatpost'))) return res;
+                throw new Error('Direct Fail');
+            })());
+        }
+
+        // Task 2: Proxy 1 (CorsProxy)
+        tasks.push((async () => {
+            const url = `https://corsproxy.io/?${encodeURIComponent(freshUrl)}`;
+            const res = await axios.get(url, { timeout: 8000 });
+            if (res.status === 200 && res.data && res.data.includes('html')) return res;
+            throw new Error('P1 Fail');
+        })());
+
+        // Task 3: Proxy 2 (AllOrigins)
+        tasks.push((async () => {
+            const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(freshUrl)}`;
+            const res = await axios.get(url, { timeout: 8000 });
+            if (res.status === 200 && res.data && res.data.includes('html')) return res;
+            throw new Error('P2 Fail');
+        })());
+
+        try {
+            // SIAPA CEPAT DIA DAPAT! (Target < 4-6 detik)
+            const winner = await Promise.any(tasks);
+            console.log(`[RACE WINNER] 🏆 Koneksi tembus via ${winner.config.url.includes('proxy') ? 'Proxy' : 'Direct'}!`);
+            LAST_CONNECTION_STATUS.lastChecked = Date.now();
+            return winner;
+        } catch (e) {
+            // Jika balapan awal gagal, sikat pakai proxy cadangan (CodeTabs & Weserv) sebagai pertahanan terakhir
+            console.log(`[RACE FAIL] Balapan awal gagal, mencoba jalur lambat...`);
             try {
-                const timeout = isRecentlyFailed ? 2000 : 8000; // Jika pernah gagal, sikat cepet aja 2 detik
-                console.log(`[GET DIRECT] ${targetUrl} (Timeout: ${timeout}ms)`);
-                const response = await axios.get(targetUrl, {
-                    headers: getHeaders(targetUrl),
-                    timeout: timeout
-                });
-
-                if (response.status === 200 && (response.data.includes('bs') || response.data.includes('utao') || response.data.includes('animatpost')) && !response.data.includes('challenge-running')) {
-                    LAST_CONNECTION_STATUS.method = 'direct';
-                    LAST_CONNECTION_STATUS.lastChecked = Date.now();
-                    return response;
-                }
-                console.log(`[DIRECT FAIL] suspicious content or blocked`);
-            } catch (error) {
-                console.log(`[DIRECT ERROR] ${targetUrl}: Switching to proxy logic...`);
-                LAST_CONNECTION_STATUS.failCount++;
-                if (LAST_CONNECTION_STATUS.failCount >= 2) {
-                    LAST_CONNECTION_STATUS.method = 'proxy';
-                    LAST_CONNECTION_STATUS.lastChecked = Date.now();
-                }
+                const url = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
+                return await axios.get(url, { timeout: 10000 });
+            } catch (err) {
+                const url = `https://images.weserv.nl/?url=${encodeURIComponent(targetUrl.replace('https://', ''))}&nocache=${timestamp}`;
+                return await axios.get(url, { timeout: 12000 });
             }
-        } else {
-            console.log(`[SKIP DIRECT] Fast-tracking to Proxy for: ${targetUrl}`);
         }
-
-        // 2. Coba via CORS Proxy (Priority 2) - CORSProxy.io dengan Cache Busting
-        try {
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(freshUrl)}`;
-            console.log(`[PROXY 1] Fetching...`);
-            const response = await axios.get(proxyUrl, {
-                headers: { 'User-Agent': getHeaders()['User-Agent'] },
-                timeout: 15000
-            });
-            if (response.status === 200 && response.data && response.data.includes('html')) {
-                LAST_CONNECTION_STATUS.lastChecked = Date.now();
-                return response;
-            }
-        } catch (error) {
-            console.error(`[PROXY 1 ERROR]: ${error.message}`);
-        }
-
-        // 3. Coba via AllOrigins (Priority 3)
-        try {
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(freshUrl)}`;
-            console.log(`[PROXY 2] Trying AllOrigins...`);
-            const response = await axios.get(proxyUrl, { timeout: 15000 });
-            if (response.status === 200 && response.data && response.data.includes('html')) {
-                LAST_CONNECTION_STATUS.lastChecked = Date.now();
-                return response;
-            }
-        } catch (error) {
-            console.error(`[PROXY 2 ERROR]: ${error.message}`);
-        }
-
-        // 4. New Fallback Proxy (Priority 4) - Cloudflare Worker or similar generic
-        try {
-            const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
-            console.log(`[PROXY 3] Trying CodeTabs...`);
-            const response = await axios.get(proxyUrl, { timeout: 15000 });
-            if (response.status === 200 && response.data && response.data.includes('html')) {
-                LAST_CONNECTION_STATUS.lastChecked = Date.now();
-                return response;
-            }
-        } catch (error) {
-            console.error(`[PROXY 3 ERROR]: ${error.message}`);
-        }
-
-        // 5. Coba via Weserv
-        try {
-            const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(targetUrl.replace('https://', ''))}&nocache=${timestamp}`;
-            console.log(`[PROXY 4] Final fallback (Weserv)...`);
-            const response = await axios.get(proxyUrl, { timeout: 15000 });
-            if (response.status === 200 && response.data) {
-                LAST_CONNECTION_STATUS.lastChecked = Date.now();
-                return response;
-            }
-        } catch (error) {
-            console.error(`[PROXY 4 ERROR]: ${error.message}`);
-        }
-
-        throw new Error(`Semua jalur koneksi (Direct & Proxy) gagal. Source kemungkinan down.`);
     },
 
     // Scraper untuk source List
