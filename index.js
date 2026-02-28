@@ -7,6 +7,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Fix for rate-limit when behind Nginx
+app.set('trust proxy', 1);
+
 // --- CORS Configuration ---
 const allowedOrigins = [
     'https://donghuawatch.my.id',
