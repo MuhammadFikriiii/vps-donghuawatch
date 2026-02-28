@@ -165,9 +165,9 @@ const scraper = {
         // 3. Coba via AllOrigins (Priority 3)
         try {
             const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(freshUrl)}`;
-            console.log(`[PROXY 2] Trying alternative...`);
+            console.log(`[PROXY 2] Trying AllOrigins...`);
             const response = await axios.get(proxyUrl, { timeout: 15000 });
-            if (response.status === 200 && response.data) {
+            if (response.status === 200 && response.data && response.data.includes('html')) {
                 LAST_CONNECTION_STATUS.lastChecked = Date.now();
                 return response;
             }
@@ -175,17 +175,30 @@ const scraper = {
             console.error(`[PROXY 2 ERROR]: ${error.message}`);
         }
 
-        // 4. Coba via Weserv
+        // 4. New Fallback Proxy (Priority 4) - Cloudflare Worker or similar generic
+        try {
+            const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
+            console.log(`[PROXY 3] Trying CodeTabs...`);
+            const response = await axios.get(proxyUrl, { timeout: 15000 });
+            if (response.status === 200 && response.data && response.data.includes('html')) {
+                LAST_CONNECTION_STATUS.lastChecked = Date.now();
+                return response;
+            }
+        } catch (error) {
+            console.error(`[PROXY 3 ERROR]: ${error.message}`);
+        }
+
+        // 5. Coba via Weserv
         try {
             const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(targetUrl.replace('https://', ''))}&nocache=${timestamp}`;
-            console.log(`[PROXY 3] Final fallback...`);
+            console.log(`[PROXY 4] Final fallback (Weserv)...`);
             const response = await axios.get(proxyUrl, { timeout: 15000 });
             if (response.status === 200 && response.data) {
                 LAST_CONNECTION_STATUS.lastChecked = Date.now();
                 return response;
             }
         } catch (error) {
-            console.error(`[PROXY 3 ERROR]: ${error.message}`);
+            console.error(`[PROXY 4 ERROR]: ${error.message}`);
         }
 
         throw new Error(`Semua jalur koneksi (Direct & Proxy) gagal. Source kemungkinan down.`);
@@ -209,7 +222,8 @@ const scraper = {
             return list.filter((v, i, a) => a.findIndex(t => (t.slug === v.slug)) === i);
         } catch (error) {
             console.error(`[_scrapeSourceList ERROR] ${path}:`, error.message);
-            return [];
+            // RE-THROW error so getHome can catch it as a failure, NOT success with empty list
+            throw error;
         }
     },
 
@@ -376,14 +390,15 @@ const scraper = {
 
             // 1. Ambil dari section Latest Release
             const latestList = [];
-            $('.latesthome').closest('.bixbox').find('.listupd article.bs').each((i, el) => {
-                const item = scraper._extractItemData($, el, false); // Latest release are episodes
+            // Try specific selector first
+            $('.latesthome').closest('.bixbox').find('.listupd article.bs, article.bs').each((i, el) => {
+                const item = scraper._extractItemData($, el, false);
                 if (item) latestList.push(item);
             });
 
-            // Fallback for Latest Release
+            // Fallback for Latest Release - find any .bs if the specific one failed
             if (latestList.length === 0) {
-                $('.listupd.normal article.bs, .listupd article.bs').each((i, el) => {
+                $('.listupd.normal article.bs, .listupd article.bs, article.bs').each((i, el) => {
                     const item = scraper._extractItemData($, el, false);
                     if (item) latestList.push(item);
                 });
@@ -392,9 +407,8 @@ const scraper = {
             // 2. Ambil dari section Popular Today (hanya di page 1)
             const popularList = [];
             if (page === 1 || path === '/') {
-                // Selector baru untuk area populer (mendukung hothome dan wpb_wrapper)
                 const popularContainer = $('.hothome').closest('.bixbox');
-                popularContainer.find('.listupd article.bs').each((i, el) => {
+                popularContainer.find('.listupd article.bs, article.bs').each((i, el) => {
                     const item = scraper._extractItemData($, el, true);
                     if (item) popularList.push(item);
                 });
@@ -410,8 +424,10 @@ const scraper = {
 
             console.log(`[Scraper] getHome page ${page}: Found ${latestList.length} latest, ${popularList.length} popular items.`);
 
+            // CRITICAL: If EVERYTHING is empty, it's likely a scraping failure (Cloudflare, etc)
             if (latestList.length === 0 && popularList.length === 0) {
-                console.log(`[Scraper] Warning: Home content empty! Source HTML length: ${response.data.length}`);
+                console.log(`[Scraper] ERROR: Home content empty! Source HTML length: ${response.data.length}`);
+                throw new Error("Gagal mengambil data: Konten kosong (kemungkinan proteksi Cloudflare)");
             }
 
             return scraper._applyFilter({
@@ -421,7 +437,8 @@ const scraper = {
             });
         } catch (error) {
             console.error("[getHome ERROR]:", error.message);
-            return { status: 'error', message: error.message };
+            // RE-THROW to trigger cache recovery or 500
+            throw error;
         }
     },
 

@@ -77,7 +77,21 @@ const getCachedData = async (key, fetcher, forceRefresh = false) => {
         console.log(`[SWR] Serving stale data for: ${key}`);
         // Trigger background refresh
         fetcher().then(data => {
-            apiCache.set(key, { data, timestamp: Date.now() });
+            // CRITICAL FIX: Only update cache if we got actual content
+            // This prevents "null" results from overwriting old good data
+            const hasData = data && (
+                (data.data && data.data.length > 0) ||
+                (data.popular && data.popular.length > 0) ||
+                (Array.isArray(data) && data.length > 0) ||
+                (data.status === 'success' && !Array.isArray(data)) // for details
+            );
+
+            if (hasData) {
+                console.log(`[SWR] Successfully updated: ${key}`);
+                apiCache.set(key, { data, timestamp: Date.now() });
+            } else {
+                console.warn(`[SWR] Refused to update ${key} with empty/null data`);
+            }
         }).catch(err => {
             console.error(`[SWR ERROR] ${key}:`, err.message);
         });
@@ -92,11 +106,26 @@ const getCachedData = async (key, fetcher, forceRefresh = false) => {
 
     try {
         const data = await promise;
-        apiCache.set(key, { data, timestamp: Date.now() });
+
+        // Validation: If it's home/ongoing/latest and is empty, we might want to check if it's an error
+        const isEmpty = data && (
+            (data.data && data.data.length === 0 && (!data.popular || data.popular.length === 0)) ||
+            (Array.isArray(data) && data.length === 0)
+        );
+
+        if (isEmpty && (key.includes('home') || key.includes('ongoing') || key.includes('latest'))) {
+            console.warn(`[CACHE] Fetched empty data for ${key}, not caching strictly...`);
+            // We set it but with a very short TTL so we try again soon
+            apiCache.set(key, { data, timestamp: Date.now() - (CACHE_TTL - 30000) });
+        } else {
+            apiCache.set(key, { data, timestamp: Date.now() });
+        }
+
         return data;
     } catch (error) {
         // If we had stale data, keep it on error instead of deleting
         if (cached && cached.data) {
+            console.log(`[CACHE] Recovered from error using stale data for: ${key}`);
             apiCache.set(key, { data: cached.data, timestamp: cached.timestamp });
             return cached.data;
         }
