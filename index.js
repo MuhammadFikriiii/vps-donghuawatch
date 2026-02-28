@@ -36,7 +36,7 @@ app.use(express.static('public'));
 // Rate Limiter Configuration
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 menit
-    max: 100, // Limit unique IP to 100 requests per windowMs
+    max: 1000, // Dinaikkan ke 1000 sesuai keinginan user, sangat aman untuk IP publik/shared
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -44,7 +44,10 @@ const apiLimiter = rateLimit({
         message: 'Too many requests, please try again later.'
     },
     skip: (req, res) => {
-        return allowedOrigins.includes(req.headers.origin);
+        const origin = req.headers.origin || '';
+        const referer = req.headers.referer || '';
+        // Skip rate limit jika berasal dari domain resmi kita
+        return allowedOrigins.some(o => origin.includes(o) || referer.includes(o));
     }
 });
 
