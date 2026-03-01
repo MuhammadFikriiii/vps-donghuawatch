@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "donghuawatch-7628a",
+  "private_key_id": "3588c0d2bdde6b9626baa4ef6cf0f2181c54801e",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDWtQ97Ncop1Ym6\nMRtQ/MOBSv9BpqJaM/SP6aH6UBQCACEYfP7/RqPwF0GZykmBCjChZXtawdwKnxzg\nhhlgkfXUVT3ud42h7NRr4TGyaIJtcsHJ4yWJGFvWyyoe+UImgUiS3+OC6f/dVDY3\nIxXJhOMSRqEAKAqQt04Xt+fNyVYLostxkagTSaiOt5vz6dkI0yIysXhWaMDLi/r9\nptg7/RzHJ9fsos/5QTrpUYYWrJ32naVv3zn5LkGJTxBPeLXiUQKLmGLL4IbkOuIS\n69UlbNuKRD1e4LbgeF5f+YfhdK1gU2uTZo58oXWwslSwF2dsrxajl25dHUQEo13b\nyCDJjuOtAgMBAAECggEAWizfXKshxmI2Hyoiw+f1IKdj/6nBxErP62V/r0bUsGZn\ngAZ3frWngt3xomrQZk7mT9L0dRC4nwlmsnH/1IxZCB3pDe/OX3S9XrXNDpZQOTGa\nbHVnPWYqpFLd1PZxLwTbezxnLIOk/8svngaxTtruF63sTsmCbndeaB3IUKi/59Bp\nYp7rf63B5VFF81J15SQAqtAyDyvNoJ7/YOK0LrGCM1DXvAg36fZt4CdXaHxXuj0f\ne7IJNJO8b+WzVpg46Zj28vqguMHkH/qg/v7b1eRgGN/8Nhg+YjO1OW+g5FzvW6Zp\n5EzGvKlG/g9Aa61zd11BnDsesu1MxTmW86l/RxVxrQKBgQD7Vc/MeE+f7FW+WNXI\nYKKpIqfOtZ9vOMoB3yuBZovU4DfBkOts2qUrjtt8jZ9MkSLAqKTs3EfwgOZ69Mkk\nlb7UKl7OrVdt9X06vgV3pjptno54XRk01OOGlyxOVwODdQ0QCTx/sQRAEOUl3WsF\nGPYdffV3WFGdJUbieNQL1F+dlwKBgQDasTcz7Y3+AMN5LAZkH+YWlHYjGasE4FQY\nbRSo19OLBsOjnhOrKR27HxMSwP9m9+3jqfHLXQJupkRWLnvl1/OU5rYp0/nXPk9g\nUMMut4wuPKl5Kzf+pqjMULtYjJeT9Z6IKFMeqH6o/HYiP8fDifwrqdzBQFaUCKl6\n9NRp7Eb5WwKBgQDWn2SfWm3ERvDBZuLIBZ1hiTJ7FiVbuMbn6kcgbQ0jb4StSq9/\neQZqt8c+CUHrBFUE5/5ONZ1JBwnKHZZWI3mde8ESBHwQbf3OV84baluimC9ZIUcR\nEmpo2FcBXtSlQSMyenCrKeJTQxoqx3VIGRSyAonGrCilZNuvMTcCEwzDaQKBgHKH\nsNNfK6fEmpqQ9d/l3MgihCQpwyjQmvoX1mP+c+kxZ6/+j2pqJAnlYkXGEXvJiCpc\nzCam1SlBpjREL9rVV9m5YdlSDFwvY76bTTzgH2fvmQm+GpsgiPJHrXXYW2G/loDU\nLYO21m6FmRCiummrkAcF9Hi4yx7H0op0QfIfLaRVAn9TkMA/+FR/x3oGt9nL5KpU\nvNJr/cAsM0OVVQiY4/S0KbAg1S6k/K5QZhdj357rzCZLEOgiD59BtZOSkZq7A4Ks\n7SS5sE0Lb3ZSO9+5Bwilsan1e67Wh77VfBBpXBLU5o35Ro8F9CEzaTEyNcmJUmc2\nPXxosDs81NOZeD/bo1Rl\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@donghuawatch-7628a.iam.gserviceaccount.com",
+  "client_id": "116514110801596133665",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40donghuawatch-7628a.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

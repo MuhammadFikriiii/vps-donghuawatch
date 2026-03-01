@@ -3,8 +3,20 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const scraper = require('./scraper');
 const resolver = require('./resolver');
+const admin = require('firebase-admin');
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
+
+// --- FIREBASE ADMIN INITIALIZATION ---
+try {
+    const serviceAccount = require('./donghuawatch-7628a-3588c0d2bdde.json');
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('✅ Firebase Admin SDK Initialized');
+} catch (err) {
+    console.error('❌ Firebase Init Error:', err.message);
+}
 
 // --- Supabase Configuration (Cepat & Mantap) ---
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -158,14 +170,79 @@ const getCachedData = async (key, fetcher, forceRefresh = false) => {
 };
 
 // --- BACKGROUND CACHE WARMING ---
+const checkNewEpisodes = async (latestItems) => {
+    if (!latestItems || !latestItems.length || !supabase) return;
+
+    const latest = latestItems[0];
+    const { data: setting } = await supabase
+        .from('site_settings')
+        .select('value')
+        .eq('key', 'last_notified_slug')
+        .single();
+
+    const lastSlug = setting?.value;
+
+    if (lastSlug && lastSlug !== latest.slug) {
+        console.log(`[AUTO PUSH] 🚀 Detecting new release: ${latest.title}`);
+
+        // Prepare Message
+        const title = `Update Episode Baru! 🎬`;
+        const message = `${latest.title} sudah rilis. Yuk tonton sekarang di DonghuaWatch!`;
+
+        try {
+            console.log(`[AUTO PUSH] 🚀 Sending: ${title} | ${message}`);
+
+            // Send to 'all' topic (Semua user yang subscribe ke topic 'all')
+            await admin.messaging().send({
+                topic: 'all',
+                notification: {
+                    title: title,
+                    body: message
+                },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        sound: 'default'
+                    }
+                }
+            });
+
+            // Update last notified slug in DB
+            await supabase.from('site_settings').upsert({
+                key: 'last_notified_slug',
+                value: latest.slug,
+                updated_at: new Date()
+            }, { onConflict: 'key' });
+
+            console.log(`[AUTO PUSH] ✅ Successfully sent to 'all' topic`);
+
+        } catch (err) {
+            console.error('[AUTO PUSH ERROR]', err.message);
+        }
+    } else if (!lastSlug) {
+        // First time initialization
+        await supabase.from('site_settings').upsert({
+            key: 'last_notified_slug',
+            value: latest.slug,
+            updated_at: new Date()
+        }, { onConflict: 'key' });
+    }
+};
+
 // VPS-optimized: Longer interval (20 min) to save CPU/RAM
 const warmUpCache = async () => {
     console.log('🔥 Warming up cache for popular routes...');
     try {
-        await getCachedData('home-1', () => scraper.getHome(1), true);
+        const home1 = await getCachedData('home-1', () => scraper.getHome(1), true);
         await getCachedData('home-2', () => scraper.getHome(2), true);
         await getCachedData('ongoing-1', () => scraper.getOngoing(1), true);
         await getCachedData('latest-only-1', () => scraper.getLatest(1), true);
+
+        // Trigger Auto Notification Check
+        if (home1 && home1.data) {
+            await checkNewEpisodes(home1.data);
+        }
+
         console.log('✅ Cache warmed up successfully');
     } catch (err) {
         console.error('⚠️ Cache warming failed:', err.message);
@@ -709,6 +786,41 @@ app.get('/api/status', async (req, res) => {
         connection_stats: scraper.LAST_CONNECTION_STATUS || {}
     };
     res.json(status);
+});
+
+/**
+ * PUSH NOTIFICATION ENDPOINT
+ * Handles manual messages from Admin Panel
+ */
+app.post('/api/push-notification', async (req, res) => {
+    const { title, message } = req.body;
+
+    if (!title || !message) {
+        return res.status(400).json({ status: 'error', message: 'Title and message are required' });
+    }
+
+    try {
+        console.log(`[PUSH NOTIF] Sending Manual Notification: "${title}" - "${message}"`);
+
+        await admin.messaging().send({
+            topic: 'all',
+            notification: {
+                title: title,
+                body: message
+            },
+            android: {
+                priority: 'high',
+                notification: {
+                    sound: 'default'
+                }
+            }
+        });
+
+        res.json({ status: 'success', message: 'Notification sent to all users' });
+    } catch (err) {
+        console.error('[PUSH ERROR]', err.message);
+        res.status(500).json({ status: 'error', message: err.message });
+    }
 });
 
 // API Documentation Page
