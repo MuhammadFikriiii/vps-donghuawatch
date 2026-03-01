@@ -26,9 +26,49 @@ const resolver = {
     },
 
     /**
+     * Helper: Robust Fetch with Proxy Fallback
+     */
+    _robustFetch: async (url, customHeaders = {}) => {
+        const timeout = 8000;
+        const headers = { ...resolver.headers, ...customHeaders };
+
+        // Try Direct first
+        try {
+            console.log(`[RESOLVER] Direct fetching: ${url}`);
+            const res = await axios.get(url, { headers, timeout });
+            if (res.status === 200) return res.data;
+        } catch (e) {
+            console.warn(`[RESOLVER] Direct fetch failed for ${url}: ${e.message}`);
+        }
+
+        // Try Proxy 1 (CorsProxy)
+        try {
+            console.log(`[RESOLVER] Proxying via P1: ${url}`);
+            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+            const res = await axios.get(proxyUrl, { timeout: 12000 });
+            if (res.status === 200) return res.data;
+        } catch (e) {
+            console.warn(`[RESOLVER] P1 failed for ${url}: ${e.message}`);
+        }
+
+        // Try Proxy 2 (AllOrigins)
+        try {
+            console.log(`[RESOLVER] Proxying via P2: ${url}`);
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+            const res = await axios.get(proxyUrl, { timeout: 12000 });
+            if (res.status === 200) return res.data;
+        } catch (e) {
+            console.warn(`[RESOLVER] P2 failed for ${url}: ${e.message}`);
+        }
+
+        throw new Error(`Failed to fetch ${url} after direct and proxy attempts`);
+    },
+
+    /**
      * SNIFF: Cari link video apapun dlm HTML
      */
     sniffGeneric: (html) => {
+        if (!html || typeof html !== 'string') return null;
         const patterns = [
             /file\s*:\s*["'](https?:\/\/[^"']+\.(m3u8|mp4)[^"']*)["']/i,
             /src\s*:\s*["'](https?:\/\/[^"']+\.(m3u8|mp4)[^"']*)["']/i,
@@ -51,8 +91,7 @@ const resolver = {
     resolveStreamruby: async (url) => {
         try {
             console.log(`[RESOLVER] Resolving Streamruby: ${url}`);
-            const res = await axios.get(url, { headers: resolver.headers, timeout: 10000 });
-            const html = res.data;
+            const html = await resolver._robustFetch(url);
 
             // 1. Cek m3u8 langsung
             let direct = resolver.sniffGeneric(html);
@@ -107,17 +146,22 @@ const resolver = {
             // Jalur Super Cepat: Metadata API (Hanya 10KB vs 300KB HTML)
             const apiUrl = `https://ok.ru/dk?cmd=videoPlayerMetadata&mid=${videoId}`;
             const pcHeaders = {
-                ...resolver.headers,
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 'Referer': 'https://ok.ru/',
                 'X-Requested-With': 'XMLHttpRequest'
             };
 
-            const response = await axios.get(apiUrl, { headers: pcHeaders, timeout: 5000 });
-            const metadata = response.data;
+            // Use Robust Fetch (includes proxy)
+            let metadataResult;
+            try {
+                const data = await resolver._robustFetch(apiUrl, pcHeaders);
+                metadataResult = typeof data === 'string' ? JSON.parse(data) : data;
+            } catch (e) {
+                console.warn('[RESOLVER] Okru API failed, trying fallback scraping...');
+            }
 
-            if (metadata && metadata.videos) {
-                const videos = metadata.videos;
+            if (metadataResult && metadataResult.videos) {
+                const videos = metadataResult.videos;
 
                 // 1. Prioritas HLS (Master Manifest)
                 const hls = videos.find(v => v.name === 'hls' || (v.url && v.url.includes('.m3u8')));
@@ -147,8 +191,7 @@ const resolver = {
             }
 
             // Fallback: Jika API gagal, pakai scraping robust lama
-            const fallbackRes = await axios.get(url, { headers: pcHeaders, timeout: 5000 });
-            const html = fallbackRes.data;
+            const html = await resolver._robustFetch(url, pcHeaders);
             const $ = cheerio.load(html);
             const optionsStr = $('div[data-options]').attr('data-options');
             if (optionsStr) {

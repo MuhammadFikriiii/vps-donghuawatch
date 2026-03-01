@@ -475,11 +475,17 @@ app.get('/api/premium/stream/:slug', async (req, res) => {
                             resolved_in: 'DATABASE (0.1s)',
                             is_cached: true
                         });
+                    } else {
+                        console.log(`[PREMIUM] 🔄 Cache expired for ${slug} (${hoursDiff.toFixed(1)}h old), re-resolving...`);
                     }
+                } else if (error && error.code !== 'PGRST116') { // PGRST116 is "No rows found"
+                    console.warn(`[DB WARNING] Supabase query error: ${error.message}`);
                 }
             } catch (dbErr) {
                 console.error('[DB ERROR] Failed to fetch cache:', dbErr.message);
             }
+        } else {
+            console.warn('[DB WARNING] Supabase is not configured, skipping persistent cache.');
         }
 
         const cached = await getCachedData(cacheKey, async () => {
@@ -493,17 +499,27 @@ app.get('/api/premium/stream/:slug', async (req, res) => {
                 console.log('[PREMIUM] Reuse existing episode cache');
                 epData = cachedEp.data;
             } else {
-                console.log('[PREMIUM] No episode cache, fetching fresh...');
+                console.log('[PREMIUM] No episode cache, fetching fresh episode details...');
                 const raw = await scraper.getEpisode(slug);
-                if (raw && raw.status === 'success') epData = raw;
+                if (raw && raw.status === 'success') {
+                    epData = raw;
+                    // Cache it manually for future use
+                    apiCache.set(`episode-${slug}`, { data: raw, timestamp: Date.now() });
+                }
             }
 
-            if (!epData || epData.status !== 'success') {
-                throw new Error('Episode data not found');
+            if (!epData || epData.status !== 'success' || !epData.data) {
+                console.error(`[PREMIUM ERROR] Episode data invalid for ${slug}:`, epData);
+                throw new Error('Episode data not found or invalid');
             }
 
             const servers = epData.data.streaming?.servers || [];
-            if (servers.length === 0) throw new Error('No servers available');
+            if (servers.length === 0) {
+                console.error(`[PREMIUM ERROR] No servers found for ${slug}`);
+                throw new Error('No servers available for this episode');
+            }
+
+            console.log(`[PREMIUM] Found ${servers.length} servers. Starting parallel resolution...`);
 
             // 2. Parallel Tasks
             const tasks = [];
@@ -513,7 +529,7 @@ app.get('/api/premium/stream/:slug', async (req, res) => {
             if (ruby) {
                 tasks.push((async () => {
                     const link = await resolver.resolveStreamruby(ruby.url);
-                    if (!link) throw new Error('Ruby failed');
+                    if (!link) throw new Error('Ruby Resolution Failed');
                     return { link, provider: 'Streamruby' };
                 })());
             }
@@ -523,58 +539,66 @@ app.get('/api/premium/stream/:slug', async (req, res) => {
             if (okru) {
                 tasks.push((async () => {
                     const link = await resolver.resolveOkru(okru.url);
-                    if (!link) throw new Error('Okru failed');
+                    if (!link) throw new Error('Okru Resolution Failed');
                     return { link, provider: 'Okru' };
                 })());
             }
 
-            // Task Generic Sniffing (untuk sisanya, coba 2 tercepat)
+            // Task Generic Sniffing
             const others = servers.filter(s => !s.url.includes('ruby') && !s.url.includes('ok.ru'));
             others.slice(0, 2).forEach(s => {
                 tasks.push((async () => {
-                    const axios = require('axios');
-                    const res = await axios.get(s.url, { headers: resolver.headers, timeout: 10000 });
-                    const link = resolver.sniffGeneric(res.data);
-                    if (!link) throw new Error('Sniff failed');
-                    return { link, provider: 'Sniff' };
+                    console.log(`[PREMIUM] Trying generic sniff for: ${s.name}`);
+                    const html = await resolver._robustFetch(s.url);
+                    const link = resolver.sniffGeneric(html);
+                    if (!link) throw new Error(`Sniff failed for ${s.name}`);
+                    return { link, provider: s.name || 'Sniff' };
                 })());
             });
 
-            if (tasks.length === 0) throw new Error('No compatible servers');
+            if (tasks.length === 0) throw new Error('No compatible premium servers found');
 
-            const result = await Promise.any(tasks);
-            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-            console.log(`[PREMIUM SUCCESS] 🚀 Super-Fast dlm ${duration}s via ${result.provider}`);
+            try {
+                const result = await Promise.any(tasks);
+                const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+                console.log(`[PREMIUM SUCCESS] 🚀 Super-Fast dlm ${duration}s via ${result.provider}`);
 
-            // Handle Multi-Quality vs Single URL
-            const isMulti = Array.isArray(result.link);
-            const finalQualities = isMulti ? result.link : null;
-            const finalStreamUrl = isMulti ? result.link[0].url : result.link;
+                // Handle Multi-Quality (Array) vs Single URL (String)
+                const isMulti = Array.isArray(result.link);
+                const finalQualities = isMulti ? result.link : null;
+                const finalStreamUrl = isMulti ? result.link[0].url : result.link;
 
-            const responseData = {
-                status: 'success',
-                stream_url: finalStreamUrl,
-                qualities: finalQualities,
-                provider: result.provider,
-                resolved_in: `${duration}s`
-            };
-
-            // 💾 SIMPAN KE SUPABASE SUPAYA INSTAN BUAT USER BERIKUTNYA
-            if (supabase) {
-                supabase.from('premium_cache').upsert({
-                    slug: slug,
+                const responseData = {
+                    status: 'success',
                     stream_url: finalStreamUrl,
                     qualities: finalQualities,
                     provider: result.provider,
-                    resolved_in: `${duration}s`,
-                    updated_at: new Date()
-                }).then(({ error }) => {
-                    if (error) console.error('[DB ERROR] Save failed:', error.message);
-                    else console.log(`[PREMIUM] 💾 Data saved to Supabase for: ${slug}`);
-                });
-            }
+                    resolved_in: `${duration}s`
+                };
 
-            return responseData;
+                // 💾 SIMPAN KE SUPABASE SUPAYA INSTAN BUAT USER BERIKUTNYA
+                if (supabase) {
+                    supabase.from('premium_cache').upsert({
+                        slug: slug,
+                        stream_url: finalStreamUrl,
+                        qualities: finalQualities,
+                        provider: result.provider,
+                        resolved_in: `${duration}s`,
+                        updated_at: new Date()
+                    }).then(({ error }) => {
+                        if (error) console.error('[DB ERROR] Save cache failed:', error.message);
+                        else console.log(`[PREMIUM] 💾 Data saved to Supabase for: ${slug}`);
+                    });
+                }
+
+                return responseData;
+            } catch (err) {
+                // Better AggregateError logging
+                if (err.name === 'AggregateError') {
+                    console.error(`[PREMIUM] All resolution providers failed for ${slug}:`, err.errors.map(e => e.message));
+                }
+                throw err;
+            }
         });
         res.json(cached);
     } catch (err) {
