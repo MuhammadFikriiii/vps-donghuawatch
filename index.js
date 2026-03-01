@@ -221,7 +221,19 @@ const checkNewEpisodes = async (latestItems) => {
                 updated_at: new Date()
             }, { onConflict: 'key' });
 
-            console.log(`[AUTO PUSH] ✅ Successfully sent to 'all' topic`);
+            // CRITICAL: Invalidate the Detail cache for this anime!
+            // Episode slug format: tales-of-herding-god-subtitle-indonesia-episode-72
+            // We want: tales-of-herding-god
+            const animeSlug = latest.slug
+                .replace(/-subtitle-indonesia/, '')
+                .replace(/-episode-\d+$/, '')
+                .replace(/-episode-/, '');
+
+            console.log(`[AUTO CACHE] 🧹 Clearing cache for anime: ${animeSlug}`);
+            apiCache.delete(`detail-${animeSlug}`);
+            await supabase.from('anime_metadata').delete().eq('slug', animeSlug);
+
+            console.log(`[AUTO PUSH] ✅ Successfully sent to 'all' topic and cleared cache for ${animeSlug}`);
 
         } catch (err) {
             console.error('[AUTO PUSH ERROR]', err.message);
@@ -425,7 +437,9 @@ app.get('/api/detail/:slug', async (req, res) => {
 
     try {
         // 1. CEK DB METADATA (SUPABASE)
-        if (supabase) {
+        const forceRefresh = req.query.refresh === 'true';
+
+        if (supabase && !forceRefresh) {
             try {
                 const { data: dbData, error } = await supabase
                     .from('anime_metadata')
@@ -433,26 +447,45 @@ app.get('/api/detail/:slug', async (req, res) => {
                     .eq('slug', slug)
                     .single();
 
-                // Pastikan data ada dan tidak rusak (ceking list episode)
+                // Pastikan data ada dan tidak rusak
                 if (dbData && !error && dbData.episodes && dbData.episodes.length > 0) {
-                    console.log(`[DETAIL] 🎯 HIT DATABASE: ${slug}`);
+                    const lastUpdate = new Date(dbData.updated_at);
+                    const now = new Date();
+                    const diffMinutes = (now - lastUpdate) / (1000 * 60);
 
-                    // Kembalikan ke format yang dimengerti Frontend
-                    return res.json({
-                        ...dbData.metadata, // Menyebar status, studio, released, rating, dll
-                        title: dbData.title,
-                        poster: dbData.poster,
-                        synopsis: dbData.synopsis,
-                        episodes_list: dbData.episodes,
-                        genres: dbData.metadata?.genres || [],
-                        status: 'success'
-                    });
+                    // Ambil status dari metadata (default ongoing jika tidak ada)
+                    const status = (dbData.metadata?.status || 'ongoing').toLowerCase();
+                    const isOngoing = status.includes('ongoing');
+
+                    // SMART TTL: 10 Menit untuk Ongoing (Biar Episode Baru Cepat Muncul)
+                    // 24 Jam untuk Tamat
+                    const ttlMinutes = isOngoing ? 10 : (24 * 60);
+
+                    if (diffMinutes < ttlMinutes) {
+                        console.log(`[DETAIL] 🎯 HIT DATABASE: ${slug} (${diffMinutes.toFixed(1)}m old, Status: ${status})`);
+
+                        return res.json({
+                            ...dbData.metadata,
+                            title: dbData.title,
+                            poster: dbData.poster,
+                            synopsis: dbData.synopsis,
+                            episodes_list: dbData.episodes,
+                            genres: dbData.metadata?.genres || [],
+                            status: 'success',
+                            is_cached: true,
+                            last_updated: dbData.updated_at,
+                            next_refresh_min: Math.max(0, (ttlMinutes - diffMinutes).toFixed(1))
+                        });
+                    }
+                    console.log(`[DETAIL] 🔄 Cache expired for ${slug} (${diffMinutes.toFixed(1)}m old, Status: ${status}), re-scraping...`);
                 }
             } catch (e) { }
+        } else if (forceRefresh) {
+            console.log(`[DETAIL] 🚀 Force refresh requested for: ${slug}`);
         }
 
-        // 2. SCRAPE JIKA TDK ADA DI DB
-        const data = await getCachedData(`detail-${slug}`, () => scraper.getDetail(slug));
+        // 2. SCRAPE JIKA TDK ADA DI DB ATAU EXPIRED
+        const data = await getCachedData(`detail-${slug}`, () => scraper.getDetail(slug), forceRefresh);
 
         if (data.status === 'success' && data.data.title) {
             // 3. SIMPAN KE DB (BACKGROUND)
