@@ -9,11 +9,16 @@ const { createClient } = require('@supabase/supabase-js');
 
 // --- FIREBASE ADMIN INITIALIZATION ---
 try {
-    const serviceAccount = require('./donghuawatch-7628a-3588c0d2bdde.json');
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-    console.log('✅ Firebase Admin SDK Initialized');
+    const keyPath = path.join(__dirname, 'firebase-key.json');
+    if (fs.existsSync(keyPath)) {
+        const serviceAccount = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log('✅ Firebase Admin SDK Initialized (Using firebase-key.json)');
+    } else {
+        console.warn('⚠️ No firebase-key.json found. Push notifications disabled.');
+    }
 } catch (err) {
     console.error('❌ Firebase Init Error:', err.message);
 }
