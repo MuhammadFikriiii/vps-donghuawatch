@@ -488,9 +488,9 @@ app.get('/api/detail/:slug', async (req, res) => {
         const data = await getCachedData(`detail-${slug}`, () => scraper.getDetail(slug), forceRefresh);
 
         if (data.status === 'success' && data.data.title) {
+            const meta = data.data;
             // 3. SIMPAN KE DB (BACKGROUND)
             if (supabase) {
-                const meta = data.data;
                 supabase.from('anime_metadata').upsert({
                     slug: slug,
                     title: meta.title,
@@ -498,15 +498,19 @@ app.get('/api/detail/:slug', async (req, res) => {
                     poster: meta.poster,
                     metadata: meta.info || {},
                     episodes: meta.episodes_list || [],
-                    updated_at: new Date()
-                }).then(({ error }) => {
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'slug' }).then(({ error }) => {
                     if (error) console.error('[DB ERROR] Detail Save failed:', error.message);
                     else console.log(`[DB] 💾 Detail cached for: ${slug}`);
                 });
             }
 
             res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=600');
-            res.json(data.data);
+            res.json({
+                ...meta,
+                status: 'success',
+                is_cached: false
+            });
         } else {
             res.json({
                 status: 'error',
